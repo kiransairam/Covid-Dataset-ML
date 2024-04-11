@@ -1,0 +1,302 @@
+---
+title: "Assignment_4_Part_1"
+output: html_notebook
+date: "2023-03-30"
+---
+
+
+1- First use “qdap” package to remove stop words and do stemming as follows (note: replace “covid” with whatever you called your dataframe)
+
+```{R}
+covid_dataset = read.csv("C:/ML/Corona_NLP_train.csv", header = TRUE, stringsAsFactors = FALSE)
+
+summary(covid_dataset)
+str(covid_dataset)
+
+```
+
+```{R}
+#Sys.setenv(JAVA_HOME="C:/Program Files/Java/jre1.8.0_301") # replace with your Java installation directory
+library(rJava)
+
+
+```
+
+```{R}
+#remove.packages("rlang")
+#install.packages("rlang", version="1.0.6")
+
+install.packages("qdap")
+#library(qdap)
+
+library(rlang)
+library(qdap)
+
+```
+```{R}
+#install.packages("SnowballC")
+library(SnowballC)
+```
+
+
+
+```{R}
+covid_dataset$OriginalTweet=rm_stopwords(covid_dataset$OriginalTweet, stopwords=tm::stopwords("english"),
+separate=FALSE, strip=TRUE)
+covid_dataset$OriginalTweet=stemmer(covid_dataset$OriginalTweet, warn=FALSE)
+
+```
+
+2- Randomize the order of rows, use the same seed as you did in assignment 2 so we can compare the two models on the same test dataset.
+
+```{R}
+covid_dataset= covid_dataset[sample(nrow(covid_dataset)), ]
+covid_dataset
+
+```
+
+3- Similar to assignment2, Convert sentiment into a factor variable with three levels: “positive, “neutral”, and “negative”. Then convert this factor variable to a numeric vector ( similar to how we encoded the labels for adult dataset in the lectures(slide 94))
+
+```{R}
+covid_dataset$Sentiment[covid_dataset$Sentiment == "Extremely Positive"] = "Positive"
+covid_dataset$Sentiment[covid_dataset$Sentiment == "Extremely Negative"] = "Negative"
+table(covid_dataset$Sentiment)
+
+```
+
+```{R}
+library("mltools")
+
+ 
+covid_dataset$Sentiment <- as.numeric(factor(covid_dataset$Sentiment, levels =c("Positive","Negative","Neutral")))-1
+covid_dataset$Sentiment
+
+```
+
+4- Spit the data three ways in to train/validation/ and test sets as follows: use the first 26340 rows for training, next 6585 rows for validation, and the last 8232 rows for testing. Make sure that you are using the same test set as you used in assignment 2 so you can compare the ANN model with your naïve Bayes model in assignmentt2.
+
+```{R}
+#install.packages("splitTools")
+#install.packages("ranger")
+ library("splitTools")
+ library("ranger")
+
+```
+
+```{R}
+train=list()
+valid=list()
+test=list()
+
+train= covid_dataset[1:26340,-6]
+valid = covid_dataset[26341:32925,-6]
+test= covid_dataset[32926:41157,-6]
+train_la = as.matrix(covid_dataset[1:26340,6])
+valid_la = as.matrix(covid_dataset[26341:32925,6])
+test_la = as.matrix(covid_dataset[32926:41157,6])
+
+```
+
+```{R}
+
+str(train_la)
+str(covid_dataset)
+
+```
+
+5- Keras has a preprocessing layer, called layer_text_vectorization, this layer creates a documentterm matrix where rows represent tweets and columns represent terms. Use the following code segment to create document-term matrix for your training, validation and test datasets you created above. (Note: replace covid_train, covid_test, and covid_val with the names you gave to your train, test and validation sets):
+
+```{R}
+library("keras")
+
+text_vectorizer <- layer_text_vectorization(output_mode="tf_idf", ngrams =2, max_tokens =5000)
+
+```
+```{R}
+text_vectorizer %>% adapt(train$OriginalTweet)
+
+covid_train_dtm = text_vectorizer(train$OriginalTweet)
+
+```
+
+```{R}
+covid_val_dtm =text_vectorizer(valid$OriginalTweet)
+covid_test_dtm= text_vectorizer(test$OriginalTweet)
+
+```
+
+Q1. (5 pts) Create an ANN model with two hidden layers to classify tweets into three classes (“Negative”, “Neutral”, and “Positive”). Note: This is a multi-class classification problem so make sure that you are using a correct loss function as well correct number of neurons/units in the final/output layer with correct activation function.
+
+```{R}
+model =keras_model_sequential()
+model %>% 
+layer_dense(units = 64, activation = 'relu') %>%
+layer_dense(units = 128, activation = 'relu') %>%
+layer_dense(units = 3, activation = 'softmax')
+
+```
+
+```{R}
+
+
+model %>% compile(
+optimizer = 'adam',
+loss = 'sparse_categorical_crossentropy',
+metrics = c('accuracy'))
+
+model
+
+```
+
+```{R}
+
+set.seed(111)
+model %>% fit(covid_train_dtm,train_la,epochs=30,batch_size=100,validation_data=list(covid_val_dtm,valid_la))
+
+```
+
+
+
+
+
+
+
+```{R}
+
+model %>% evaluate(covid_test_dtm, test_la)
+
+```
+
+```{R}
+predicted_labels = as.numeric(model %>% predict(covid_test_dtm) %>%k_argmax())
+predicted_labels[1:30]
+```
+
+```{R}
+t = table(test_la, predicted_labels)
+t
+
+```
+
+```{R}
+error = (t[1,2]+t[2,1])/sum(t)
+error
+
+```
+
+
+Q2. (5 pts) Use “tfruns” package to tune your ANN’s hyper- parameters including the number of nodes in each hidden layer, the batch_size, and learning_rate). Validate each model on the validation set. Answer the following questions:
+
+```{R}
+library(tfruns)
+
+```
+
+```{R}
+set.seed(123)
+
+```
+
+```{R}
+
+set.seed(1)
+
+runs <- tuning_run("C:/ML/covidd.R", 
+  flags = list(
+  nodes = c(64, 128, 392),
+  learning_rate = c(0.01, 0.05, 0.001, 0.0001), 
+  batch_size=c(100,200,500,1000),
+  epochs=c(30,50, 100),
+  activation=c("relu","sigmoid", "tanh")),
+  sample = 0.02
+)
+
+```
+```{R}
+runs
+```
+
+2.1) 9th run highest accuracy with 0.9995
+```{R}
+view_run(runs$run_dir[9])
+
+```
+2.3) YES, validation_loss stop decreasing after several epochs. it stop at 8th.
+
+
+Q3. (5 pts)Now that we tuned the hyperparameters and selected the best model, we don’t need to withhold validation data anymore and can use it for training. Add the validation data to the train data. You can do this by first, converting your covid_train_dtm and covid_val_dtm into matrices and then combining them using “rbind”. Make sure that you also combine the train and validation labels (sentiments). Now re-train your best model on this new training data and evaluate it on the test data. Compute precision and recall for the positive/neutral/ and negative classes as you did for assignment 2. How does this model perform compare to your naïve Bayes model in assignment 2?
+
+```{R}
+
+data1 = (as.matrix(covid_train_dtm))
+data2 = (as.matrix(covid_val_dtm))
+
+
+
+```
+
+```{R}
+train_data = rbind(data1, data2)
+
+```
+
+```{R}
+lab_tuned = covid_dataset[1:32925, ]$Sentiment
+
+```
+
+```{R}
+model = keras_model_sequential()
+model %>%
+  layer_dense(units = 128, activation = 'sigmoid') %>%
+  layer_dense(units = 128, activation = 'sigmoid') %>%
+  layer_dense(units = 3, activation = "softmax")
+
+```
+```{R}
+model %>% compile(
+  optimizer = optimizer_adam(learning_rate = 0.0001), 
+  loss = 'sparse_categorical_crossentropy', 
+  metrics = c('accuracy'))
+
+```
+
+```{R}
+set.seed(123)
+
+model %>% fit(
+  train_data, lab_tuned , epochs = 30, batch_size = 500,
+  validation_data=list(covid_test_dtm, test_la))
+
+```
+
+```{R}
+model %>% evaluate(covid_test_dtm, test_la)
+
+```
+
+```{R}
+predicted_labels = as.numeric(model %>% predict(covid_test_dtm) %>%k_argmax())
+predicted_labels[1:30]
+
+```
+
+```{R}
+t = table(test_la, predicted_labels)
+t
+
+```
+
+```{R}
+error = (t[1,2]+t[2,1])/sum(t)
+error
+
+```
+the code provided is 0.09353741, which means that the error rate is approximately 9.35%.
+
+The accuracy rate of the Naive Bayes model in the assignment was found to be 67.3%. In contrast, the accuracy rate achieved through hyper-tuning of the Artificial Neural Network (ANN) was around 90%.
+
+
+
+
+
